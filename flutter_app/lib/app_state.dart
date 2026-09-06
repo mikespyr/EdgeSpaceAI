@@ -430,22 +430,6 @@ class AppState extends ChangeNotifier {
       conversation,
     );
 
-    // App-help questions are answered from a curated knowledge base first.
-    // This makes navigation/help work even with no telemetry and no backend.
-    final appGuideAnswer = _knowledge.answer(
-      contextualQuestion,
-      buildingCount: buildings.length,
-      roomCount: rooms.length,
-      provisionedDeviceCount: provisionedDevices.length,
-      demoMode: demoMode,
-      backendOnline: backendOnline,
-      conversation: conversation,
-    );
-
-    if (appGuideAnswer != null) {
-      return appGuideAnswer;
-    }
-
     final relevantSnapshots = selectedRoom == null
         ? snapshotsWithData
         : hasTelemetry(selectedRoom.id)
@@ -458,8 +442,13 @@ class AppState extends ChangeNotifier {
             ? insightsFor(selectedRoom)
             : <Insight>[];
 
-    // Remote AI receives both the conversation and an explicit description
-    // of the application, its current topology and the latest telemetry.
+    // REMOTE-FIRST ROUTING
+    // When the cloud AI is available, every normal user question goes there
+    // first. This prevents broad local keyword matching from hijacking general
+    // questions (for example, "αναλυτικά" accidentally matching Analytics).
+    // The backend already receives the full EdgeSpace app context, current
+    // topology, telemetry summary and recent conversation, so it can answer
+    // both general questions and app-specific questions naturally.
     if (useGemini && backendOnline) {
       try {
         final answer = await ApiClient(
@@ -479,15 +468,32 @@ class AppState extends ChangeNotifier {
           return answer;
         }
       } catch (_) {
-        // Fall through to the deterministic local advisor so the UI remains
-        // useful when Gemini/the backend is temporarily unavailable.
+        // If every configured cloud model fails, continue with the local
+        // app guide and finally the local sensor advisor.
       }
+    }
+
+    // LOCAL APP GUIDE FALLBACK
+    // Used when cloud AI is disabled/unavailable or when all remote models
+    // fail. It remains useful for deterministic navigation/help.
+    final appGuideAnswer = _knowledge.answer(
+      contextualQuestion,
+      buildingCount: buildings.length,
+      roomCount: rooms.length,
+      provisionedDeviceCount: provisionedDevices.length,
+      demoMode: demoMode,
+      backendOnline: backendOnline,
+      conversation: conversation,
+    );
+
+    if (appGuideAnswer != null) {
+      return appGuideAnswer;
     }
 
     if (!_advisor.canAnswer(contextualQuestion)) {
       return backendOnline && useGemini
-          ? 'Δεν μπόρεσα να πάρω απάντηση από το Gemini αυτή τη στιγμή. Δοκίμασε ξανά σε λίγο.'
-          : 'Η ερώτησή σου χρειάζεται το γενικό Gemini για να απαντηθεί σωστά. Αυτή τη στιγμή το remote AI δεν είναι διαθέσιμο, αλλά μπορώ να σε βοηθήσω πλήρως με τη χρήση του EdgeSpace AI και με τις μετρήσεις των χώρων.';
+          ? 'Το cloud AI δεν μπόρεσε να απαντήσει αυτή τη στιγμή. Δοκίμασε ξανά σε λίγο.'
+          : 'Η ερώτησή σου χρειάζεται το cloud AI για να απαντηθεί σωστά. Αυτή τη στιγμή δεν είναι διαθέσιμο, αλλά μπορώ να σε βοηθήσω με τη χρήση του EdgeSpace AI και με τις μετρήσεις των χώρων.';
     }
 
     if (relevantSnapshots.isEmpty) {

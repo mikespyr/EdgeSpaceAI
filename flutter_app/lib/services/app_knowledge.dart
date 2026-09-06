@@ -469,7 +469,22 @@ class AppKnowledgeBase {
       return 'Οι βασικές ρυθμίσεις είναι στο tab Settings. Εκεί βρίσκεις Device Manager, Connect New Kit, Backend URL, Demo data mode και Gemini AI Advisor.';
     }
 
-    if (_hasAny(q, ['analytics', 'αναλυτικ', 'γραφημ', 'chart', 'μετρικ', 'στατιστικ'])) {
+    // Avoid the broad stem 'αναλυτικ': it also matches the everyday word
+    // 'αναλυτικά' and can incorrectly route general questions to Analytics.
+    if (_hasAny(q, [
+      'analytics',
+      'analytics tab',
+      'σελιδα analytics',
+      'καρτελα analytics',
+      'γραφημ',
+      'chart',
+      'μετρικ',
+      'στατιστικ',
+      'αναλυση δεδομενων',
+      'αναλυσεισ δεδομενων',
+      'αναλυση χωρων',
+      'αναλυσεισ χωρων',
+    ])) {
       return 'Στο Analytics μπορείς να αλλάξεις Parameter, Aggregation, Time Range, Building και Room filter. '
           'Βλέπεις cross-space snapshot, room ranking και automatic insights. Το Copy CSV αντιγράφει τα δεδομένα, ενώ ο πραγματικός file/PDF exporter δεν έχει ακόμη συνδεθεί στο prototype.';
     }
