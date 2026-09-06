@@ -131,10 +131,6 @@ class LocalAdvisor {
       'worst',
       'compare',
       'συγκριν',
-      'δωματι',
-      'room',
-      'χωρ',
-      'space',
     ].any(q.contains);
   }
 

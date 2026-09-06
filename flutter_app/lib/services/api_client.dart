@@ -74,7 +74,7 @@ class ApiClient {
                 .toList(),
           }),
         )
-        .timeout(const Duration(seconds: 30));
+        .timeout(const Duration(seconds: 90));
     if (response.statusCode >= 300) {
       final detail = response.body.isEmpty ? 'AI request failed' : response.body;
       throw Exception(detail);

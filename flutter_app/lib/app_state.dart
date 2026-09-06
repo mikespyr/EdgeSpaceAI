@@ -467,9 +467,10 @@ class AppState extends ChangeNotifier {
         if (answer.isNotEmpty) {
           return answer;
         }
-      } catch (_) {
-        // If every configured cloud model fails, continue with the local
-        // app guide and finally the local sensor advisor.
+      } catch (e) {
+        // Keep the app usable, but expose the real remote failure in Flutter
+        // logs so a timeout/API error is never hidden behind a local answer.
+        debugPrint('EdgeSpace remote AI failed: $e');
       }
     }
 
