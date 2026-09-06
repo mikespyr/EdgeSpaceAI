@@ -21,12 +21,12 @@ DB_PATH = Path(os.getenv("EDGESPACE_DB_PATH", APP_DIR / "data" / "edgespace.db")
 DB_PATH.parent.mkdir(parents=True, exist_ok=True)
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.1-flash-lite").strip()
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemma-4-31b-it").strip()
 GEMINI_FALLBACK_MODELS = [
     model.strip()
     for model in os.getenv(
         "GEMINI_FALLBACK_MODELS",
-        "gemini-3.5-flash-lite",
+        "gemini-3.5-flash-lite,gemini-3.1-flash-lite",
     ).split(",")
     if model.strip()
 ]
@@ -200,7 +200,7 @@ def build_contents(req: AiChatRequest) -> list[dict[str, Any]]:
     return contents
 
 
-async def _ask_gemini_model(
+async def _ask_model(
     req: AiChatRequest,
     model: str,
 ) -> tuple[str, int, str]:
@@ -233,7 +233,7 @@ async def _ask_gemini_model(
         async with httpx.AsyncClient(timeout=45.0) as client:
             response = await client.post(url, headers=headers, json=payload)
     except httpx.HTTPError as exc:
-        return "", 0, f"Could not reach Gemini API: {exc}"
+        return "", 0, f"Could not reach Google Generative Language API: {exc}"
 
     if response.status_code >= 300:
         detail = response.text
@@ -247,18 +247,17 @@ async def _ask_gemini_model(
     body = response.json()
     candidates = body.get("candidates") or []
     if not candidates:
-        return "", 502, "Gemini returned no candidate."
+        return "", 502, "Model returned no candidate."
 
     parts = candidates[0].get("content", {}).get("parts", [])
-    answer = "\
-".join(
+    answer = "\n".join(
         str(part.get("text", "")).strip()
         for part in parts
         if part.get("text")
     ).strip()
 
     if not answer:
-        return "", 502, "Gemini returned an empty answer."
+        return "", 502, "Model returned an empty answer."
 
     return answer, response.status_code, ""
 
@@ -267,7 +266,7 @@ async def ask_gemini(req: AiChatRequest) -> tuple[str, str, bool]:
     if not GEMINI_API_KEY:
         raise HTTPException(
             status_code=503,
-            detail="Gemini is not configured. Set GEMINI_API_KEY in the backend environment.",
+            detail="Google AI is not configured. Set GEMINI_API_KEY in the backend environment.",
         )
 
     models: list[str] = []
@@ -275,27 +274,31 @@ async def ask_gemini(req: AiChatRequest) -> tuple[str, str, bool]:
         if model and model not in models:
             models.append(model)
 
-    errors: list[str] = []
+    attempts: list[str] = []
 
     for index, model in enumerate(models):
-        answer, status_code, detail = await _ask_gemini_model(req, model)
+        answer, status_code, detail = await _ask_model(req, model)
 
         if answer:
             return answer, model, index > 0
 
-        errors.append(f"{model}: {status_code or 'network'} - {detail}")
+        attempts.append(f"{model}: {status_code or 'network'} - {detail}")
 
+        # Authentication/permission errors normally affect the whole API key,
+        # so another model would not help and would only waste requests.
         if status_code in {401, 403}:
             break
 
+        # Retry with the next configured model for quota, model availability,
+        # timeout/network and temporary server errors.
         if status_code not in {0, 404, 408, 429, 500, 502, 503, 504}:
             break
 
     raise HTTPException(
         status_code=503,
         detail={
-            "message": "All configured Gemini models failed.",
-            "attempts": errors,
+            "message": "All configured Google AI models failed.",
+            "attempts": attempts,
             "local_fallback": True,
         },
     )
