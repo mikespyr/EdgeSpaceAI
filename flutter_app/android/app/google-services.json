@@ -1,0 +1,47 @@
+{
+  "project_info": {
+    "project_number": "380056007506",
+    "project_id": "edgespace-ai",
+    "storage_bucket": "edgespace-ai.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:380056007506:android:8bb8fb054de6324420008b",
+        "android_client_info": {
+          "package_name": "com.edgespaceai.app"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "380056007506-jd0m8gc1cm8jphfoajl1qti343ujpltc.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.edgespaceai.app",
+            "certificate_hash": "e796da3b3ae9f2dad8ff61beb864c9a2164b6550"
+          }
+        },
+        {
+          "client_id": "380056007506-04qjt5eahu6dblj6oq1b7en0qlkui7de.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCG3563m8hz-Yy5ajIXlgn6TqBZq5MbeeU"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "380056007506-04qjt5eahu6dblj6oq1b7en0qlkui7de.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
