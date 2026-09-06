@@ -39,8 +39,50 @@ class AppState extends ChangeNotifier {
   bool demoMode = true;
   bool useGemini = true;
   bool backendOnline = false;
+
+  String? activeAiModel;
+  bool aiFallbackUsed = false;
+  bool aiUsingRemote = false;
+
   RangePreset selectedRange = RangePreset.hour24;
   bool _syncing = false;
+
+  String get aiBadgeLabel {
+    if (!useGemini || !backendOnline || !aiUsingRemote) {
+      return 'App Guide • Local';
+    }
+
+    final friendly = _friendlyAiModel(activeAiModel);
+    if (friendly == null) {
+      return 'AI • Online';
+    }
+
+    return aiFallbackUsed
+        ? '$friendly • Fallback'
+        : '$friendly • Online';
+  }
+
+  String? _friendlyAiModel(String? rawModel) {
+    final model = rawModel?.trim().toLowerCase();
+    if (model == null || model.isEmpty) {
+      return null;
+    }
+
+    if (model.contains('gemini-3.8-flash')) return 'Gemini 3.8';
+    if (model.contains('gemma-4-31b')) return 'Gemma 4 31B';
+    if (model.contains('gemma-4-26b')) return 'Gemma 4 26B';
+    if (model.contains('gemini-3.5-flash-lite')) return 'Gemini 3.5';
+    if (model.contains('gemini-3.1-flash-lite')) return 'Gemini 3.1';
+    if (model.contains('gemini')) return 'Gemini';
+    if (model.contains('gemma')) return 'Gemma';
+    return rawModel;
+  }
+
+  void _markLocalAi() {
+    aiUsingRemote = false;
+    aiFallbackUsed = false;
+    notifyListeners();
+  }
 
   Future<void> initialize() async {
     final prefs = await SharedPreferences.getInstance();
@@ -451,9 +493,9 @@ class AppState extends ChangeNotifier {
     // both general questions and app-specific questions naturally.
     if (useGemini && backendOnline) {
       try {
-        final answer = await ApiClient(
+        final reply = await ApiClient(
           backendUrl,
-        ).askAi(
+        ).askAiDetailed(
           question: question,
           roomId: selectedRoom?.id,
           conversation: conversation,
@@ -464,8 +506,12 @@ class AppState extends ChangeNotifier {
           ),
         );
 
-        if (answer.isNotEmpty) {
-          return answer;
+        if (reply.answer.isNotEmpty) {
+          activeAiModel = reply.model.isEmpty ? activeAiModel : reply.model;
+          aiFallbackUsed = reply.fallbackUsed;
+          aiUsingRemote = true;
+          notifyListeners();
+          return reply.answer;
         }
       } catch (e) {
         // Keep the app usable, but expose the real remote failure in Flutter
@@ -488,21 +534,25 @@ class AppState extends ChangeNotifier {
     );
 
     if (appGuideAnswer != null) {
+      _markLocalAi();
       return appGuideAnswer;
     }
 
     if (!_advisor.canAnswer(contextualQuestion)) {
+      _markLocalAi();
       return backendOnline && useGemini
           ? 'Το cloud AI δεν μπόρεσε να απαντήσει αυτή τη στιγμή. Δοκίμασε ξανά σε λίγο.'
           : 'Η ερώτησή σου χρειάζεται το cloud AI για να απαντηθεί σωστά. Αυτή τη στιγμή δεν είναι διαθέσιμο, αλλά μπορώ να σε βοηθήσω με τη χρήση του EdgeSpace AI και με τις μετρήσεις των χώρων.';
     }
 
     if (relevantSnapshots.isEmpty) {
+      _markLocalAi();
       return selectedRoom == null
           ? 'Δεν υπάρχουν ακόμη μετρήσεις χώρων για ανάλυση. Μπορείς όμως να με ρωτήσεις οτιδήποτε για το πώς χρησιμοποιείται η εφαρμογή, π.χ. «πώς φτιάχνω νέο δωμάτιο;».'
           : 'Δεν υπάρχουν ακόμη μετρήσεις για το ${selectedRoom.name}. Μπορώ παρ’ όλα αυτά να σε καθοδηγήσω για τις λειτουργίες της εφαρμογής ή τη σύνδεση του kit.';
     }
 
+    _markLocalAi();
     return _advisor.answer(
       contextualQuestion,
       relevantSnapshots,
@@ -582,9 +632,19 @@ class AppState extends ChangeNotifier {
   // ============================================================
 
   Future<void> checkBackend() async {
-    backendOnline = await ApiClient(
+    final info = await ApiClient(
       backendUrl,
-    ).health();
+    ).healthInfo();
+
+    backendOnline = info.online;
+    if (info.model != null && info.model!.isNotEmpty) {
+      activeAiModel = info.model;
+    }
+
+    aiUsingRemote = useGemini && backendOnline;
+    if (!backendOnline) {
+      aiFallbackUsed = false;
+    }
 
     notifyListeners();
   }
