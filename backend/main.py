@@ -21,7 +21,15 @@ DB_PATH = Path(os.getenv("EDGESPACE_DB_PATH", APP_DIR / "data" / "edgespace.db")
 DB_PATH.parent.mkdir(parents=True, exist_ok=True)
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.8-flash").strip()
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.1-flash-lite").strip()
+GEMINI_FALLBACK_MODELS = [
+    model.strip()
+    for model in os.getenv(
+        "GEMINI_FALLBACK_MODELS",
+        "gemini-3.5-flash-lite",
+    ).split(",")
+    if model.strip()
+]
 
 app = FastAPI(
     title="EdgeSpace AI Backend",
@@ -192,16 +200,13 @@ def build_contents(req: AiChatRequest) -> list[dict[str, Any]]:
     return contents
 
 
-async def ask_gemini(req: AiChatRequest) -> str:
-    if not GEMINI_API_KEY:
-        raise HTTPException(
-            status_code=503,
-            detail="Gemini is not configured. Set GEMINI_API_KEY in backend/.env.",
-        )
-
+async def _ask_gemini_model(
+    req: AiChatRequest,
+    model: str,
+) -> tuple[str, int, str]:
     url = (
         "https://generativelanguage.googleapis.com/v1beta/"
-        f"models/{GEMINI_MODEL}:generateContent"
+        f"models/{model}:generateContent"
     )
 
     payload = {
@@ -228,10 +233,7 @@ async def ask_gemini(req: AiChatRequest) -> str:
         async with httpx.AsyncClient(timeout=45.0) as client:
             response = await client.post(url, headers=headers, json=payload)
     except httpx.HTTPError as exc:
-        raise HTTPException(
-            status_code=502,
-            detail=f"Could not reach Gemini API: {exc}",
-        ) from exc
+        return "", 0, f"Could not reach Gemini API: {exc}"
 
     if response.status_code >= 300:
         detail = response.text
@@ -240,27 +242,63 @@ async def ask_gemini(req: AiChatRequest) -> str:
             detail = body.get("error", {}).get("message", detail)
         except Exception:
             pass
-        raise HTTPException(
-            status_code=502,
-            detail=f"Gemini API error ({response.status_code}): {detail}",
-        )
+        return "", response.status_code, detail
 
     body = response.json()
     candidates = body.get("candidates") or []
     if not candidates:
-        raise HTTPException(status_code=502, detail="Gemini returned no candidate.")
+        return "", 502, "Gemini returned no candidate."
 
     parts = candidates[0].get("content", {}).get("parts", [])
-    text = "\n".join(
+    answer = "\
+".join(
         str(part.get("text", "")).strip()
         for part in parts
         if part.get("text")
     ).strip()
 
-    if not text:
-        raise HTTPException(status_code=502, detail="Gemini returned an empty answer.")
+    if not answer:
+        return "", 502, "Gemini returned an empty answer."
 
-    return text
+    return answer, response.status_code, ""
+
+
+async def ask_gemini(req: AiChatRequest) -> tuple[str, str, bool]:
+    if not GEMINI_API_KEY:
+        raise HTTPException(
+            status_code=503,
+            detail="Gemini is not configured. Set GEMINI_API_KEY in the backend environment.",
+        )
+
+    models: list[str] = []
+    for model in [GEMINI_MODEL, *GEMINI_FALLBACK_MODELS]:
+        if model and model not in models:
+            models.append(model)
+
+    errors: list[str] = []
+
+    for index, model in enumerate(models):
+        answer, status_code, detail = await _ask_gemini_model(req, model)
+
+        if answer:
+            return answer, model, index > 0
+
+        errors.append(f"{model}: {status_code or 'network'} - {detail}")
+
+        if status_code in {401, 403}:
+            break
+
+        if status_code not in {0, 404, 408, 429, 500, 502, 503, 504}:
+            break
+
+    raise HTTPException(
+        status_code=503,
+        detail={
+            "message": "All configured Gemini models failed.",
+            "attempts": errors,
+            "local_fallback": True,
+        },
+    )
 
 
 # ============================================================
@@ -274,6 +312,7 @@ def root() -> dict[str, Any]:
         "status": "online",
         "gemini_configured": bool(GEMINI_API_KEY),
         "gemini_model": GEMINI_MODEL,
+        "gemini_fallback_models": GEMINI_FALLBACK_MODELS,
     }
 
 
@@ -284,6 +323,7 @@ def health() -> dict[str, Any]:
         "service": "EdgeSpace AI Backend",
         "gemini_configured": bool(GEMINI_API_KEY),
         "gemini_model": GEMINI_MODEL,
+        "gemini_fallback_models": GEMINI_FALLBACK_MODELS,
     }
 
 
@@ -406,8 +446,9 @@ def telemetry_history(
 
 @app.post("/api/v1/ai/chat")
 async def ai_chat(req: AiChatRequest) -> dict[str, Any]:
-    answer = await ask_gemini(req)
+    answer, model, fallback_used = await ask_gemini(req)
     return {
         "answer": answer,
-        "model": GEMINI_MODEL,
+        "model": model,
+        "fallback_used": fallback_used,
     }
