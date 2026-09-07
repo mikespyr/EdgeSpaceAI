@@ -609,11 +609,11 @@ class _SpacesScreenState extends State<SpacesScreen> {
     BuildContext context,
     AppState state,
   ) async {
-    await showModalBottomSheet<void>(
+    final action = await showModalBottomSheet<String>(
       context: context,
       backgroundColor: EdgeColors.panel,
       showDragHandle: true,
-      builder: (context) => SafeArea(
+      builder: (sheetContext) => SafeArea(
         child: Padding(
           padding: const EdgeInsets.fromLTRB(
             16,
@@ -634,8 +634,7 @@ class _SpacesScreenState extends State<SpacesScreen> {
                   'Create a new physical site or building.',
                 ),
                 onTap: () {
-                  Navigator.pop(context);
-                  _addBuilding(context, state);
+                  Navigator.pop(sheetContext, 'building');
                 },
               ),
               ListTile(
@@ -648,8 +647,7 @@ class _SpacesScreenState extends State<SpacesScreen> {
                   'Create a room and assign a device later.',
                 ),
                 onTap: () {
-                  Navigator.pop(context);
-                  _addRoom(context, state);
+                  Navigator.pop(sheetContext, 'room');
                 },
               ),
               ListTile(
@@ -664,12 +662,7 @@ class _SpacesScreenState extends State<SpacesScreen> {
                   'Scan, configure Wi-Fi and assign it to a room.',
                 ),
                 onTap: () {
-                  Navigator.pop(context);
-                  Navigator.of(context).push(
-                    MaterialPageRoute(
-                      builder: (_) => const ProvisionDeviceScreen(),
-                    ),
-                  );
+                  Navigator.pop(sheetContext, 'device');
                 },
               ),
             ],
@@ -677,6 +670,28 @@ class _SpacesScreenState extends State<SpacesScreen> {
         ),
       ),
     );
+
+    if (!context.mounted || action == null) {
+      return;
+    }
+
+    switch (action) {
+      case 'building':
+        await _addBuilding(context, state);
+        break;
+
+      case 'room':
+        await _addRoom(context, state);
+        break;
+
+      case 'device':
+        await Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => const ProvisionDeviceScreen(),
+          ),
+        );
+        break;
+    }
   }
 
   // ============================================================
@@ -729,9 +744,6 @@ class _SpacesScreenState extends State<SpacesScreen> {
 
     final buildingName = name.text.trim();
     final buildingLocation = location.text.trim();
-
-    name.dispose();
-    location.dispose();
 
     if (ok == true && buildingName.isNotEmpty) {
       state.addBuilding(
@@ -838,9 +850,6 @@ class _SpacesScreenState extends State<SpacesScreen> {
     final roomName = name.text.trim();
     final roomFloor = floor.text.trim();
 
-    name.dispose();
-    floor.dispose();
-
     if (ok == true && roomName.isNotEmpty) {
       state.addRoom(
         buildingId: selected,
@@ -906,9 +915,6 @@ class _SpacesScreenState extends State<SpacesScreen> {
 
     final buildingName = name.text.trim();
     final buildingLocation = location.text.trim();
-
-    name.dispose();
-    location.dispose();
 
     if (ok == true && buildingName.isNotEmpty) {
       state.editBuilding(
@@ -1054,9 +1060,6 @@ class _SpacesScreenState extends State<SpacesScreen> {
 
     final roomName = name.text.trim();
     final roomFloor = floor.text.trim();
-
-    name.dispose();
-    floor.dispose();
 
     if (ok == true && roomName.isNotEmpty) {
       state.editRoom(

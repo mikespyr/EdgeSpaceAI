@@ -4,6 +4,30 @@ import 'package:http/http.dart' as http;
 
 import '../models/models.dart';
 
+class AiReply {
+  const AiReply({
+    required this.answer,
+    required this.model,
+    required this.fallbackUsed,
+  });
+
+  final String answer;
+  final String model;
+  final bool fallbackUsed;
+}
+
+class BackendHealthInfo {
+  const BackendHealthInfo({
+    required this.online,
+    this.model,
+    this.fallbackModels = const [],
+  });
+
+  final bool online;
+  final String? model;
+  final List<String> fallbackModels;
+}
+
 class ApiClient {
   ApiClient(this.baseUrl);
   final String baseUrl;
@@ -13,13 +37,47 @@ class ApiClient {
     return Uri.parse('$clean$path').replace(queryParameters: query);
   }
 
-  Future<bool> health() async {
+  Future<BackendHealthInfo> healthInfo() async {
     try {
-      final response = await http.get(_uri('/health')).timeout(const Duration(seconds: 4));
-      return response.statusCode < 300;
+      final response = await http
+          .get(_uri('/health'))
+          .timeout(const Duration(seconds: 6));
+
+      if (response.statusCode >= 300) {
+        return const BackendHealthInfo(online: false);
+      }
+
+      String? model;
+      var fallbackModels = <String>[];
+
+      try {
+        final data = (jsonDecode(response.body) as Map).cast<String, dynamic>();
+        final rawModel = '${data['gemini_model'] ?? ''}'.trim();
+        model = rawModel.isEmpty ? null : rawModel;
+
+        final rawFallbacks = data['gemini_fallback_models'];
+        if (rawFallbacks is List) {
+          fallbackModels = rawFallbacks
+              .map((item) => '$item'.trim())
+              .where((item) => item.isNotEmpty)
+              .toList();
+        }
+      } catch (_) {
+        // Older backend health payloads may not expose model metadata.
+      }
+
+      return BackendHealthInfo(
+        online: true,
+        model: model,
+        fallbackModels: fallbackModels,
+      );
     } catch (_) {
-      return false;
+      return const BackendHealthInfo(online: false);
     }
+  }
+
+  Future<bool> health() async {
+    return (await healthInfo()).online;
   }
 
   Future<void> registerDevice({required String deviceId, required String roomId, String? name}) async {
@@ -46,7 +104,7 @@ class ApiClient {
     return _rowsToPoints(roomId, [row]);
   }
 
-  Future<String> askAi({
+  Future<AiReply> askAiDetailed({
     required String question,
     String? roomId,
     String? appContext,
@@ -75,12 +133,37 @@ class ApiClient {
           }),
         )
         .timeout(const Duration(seconds: 90));
+
     if (response.statusCode >= 300) {
       final detail = response.body.isEmpty ? 'AI request failed' : response.body;
       throw Exception(detail);
     }
+
     final data = (jsonDecode(response.body) as Map).cast<String, dynamic>();
-    return '${data['answer'] ?? ''}'.trim();
+    final answer = '${data['answer'] ?? ''}'.trim();
+    final model = '${data['model'] ?? ''}'.trim();
+    final fallbackUsed = data['fallback_used'] == true;
+
+    return AiReply(
+      answer: answer,
+      model: model,
+      fallbackUsed: fallbackUsed,
+    );
+  }
+
+  Future<String> askAi({
+    required String question,
+    String? roomId,
+    String? appContext,
+    List<ChatMessage> conversation = const [],
+  }) async {
+    final result = await askAiDetailed(
+      question: question,
+      roomId: roomId,
+      appContext: appContext,
+      conversation: conversation,
+    );
+    return result.answer;
   }
 
   List<SensorPoint> _rowsToPoints(String roomId, List<Map<String, dynamic>> rows) {

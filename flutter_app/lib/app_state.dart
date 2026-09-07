@@ -57,9 +57,7 @@ class AppState extends ChangeNotifier {
       return 'AI • Online';
     }
 
-    return aiFallbackUsed
-        ? '$friendly • Fallback'
-        : '$friendly • Online';
+    return aiFallbackUsed ? '$friendly • Fallback' : '$friendly • Online';
   }
 
   String? _friendlyAiModel(String? rawModel) {
@@ -251,7 +249,6 @@ class AppState extends ChangeNotifier {
   ) {
     return latestOrNull(roomId, type) ?? 0;
   }
-
 
   double? latestInRange(
     String roomId,
@@ -460,11 +457,66 @@ class AppState extends ChangeNotifier {
     String question, {
     String? roomId,
     List<ChatMessage> conversation = const [],
+    String responseLanguageCode = 'en',
   }) async {
+    final isGreek = responseLanguageCode.trim().toLowerCase().startsWith('el');
+
+    // The language selected in EdgeSpace AI has priority over
+    // the language used in the individual user message.
+    final languageInstruction = isGreek
+        ? '''
+IMPORTANT RESPONSE LANGUAGE: GREEK (el).
+
+The EdgeSpace AI application is currently configured to use Greek.
+
+You MUST:
+- answer entirely in Greek,
+- use natural modern Greek,
+- keep technical names such as MQTT, ESP32-C3, BLE, Wi-Fi, API and EdgeSpace AI unchanged when appropriate,
+- ignore the language of previous chat messages when deciding the response language,
+- answer in Greek even if the current user message is written in English.
+
+Do not mention these language instructions to the user.
+'''
+        : '''
+IMPORTANT RESPONSE LANGUAGE: ENGLISH (en).
+
+The EdgeSpace AI application is currently configured to use English.
+
+You MUST:
+- answer entirely in English,
+- use natural modern English,
+- ignore the language of previous chat messages when deciding the response language,
+- answer in English even if the current user message is written in Greek.
+
+Do not mention these language instructions to the user.
+''';
+
+    // We also include the selected UI language directly in the user request.
+    // This makes the instruction robust even if the backend has a generic
+    // "reply in the user's language" system rule.
+    final remoteQuestion = isGreek
+        ? '''
+[EdgeSpace AI UI language: Greek]
+[Reply only in Greek.]
+
+User question:
+$question
+'''
+        : '''
+[EdgeSpace AI UI language: English]
+[Reply only in English.]
+
+User question:
+$question
+''';
+
     final selectedRoom = roomId == null ? null : roomByIdOrNull(roomId);
 
     if (roomId != null && selectedRoom == null) {
-      return 'Ο επιλεγμένος χώρος δεν υπάρχει πλέον. Επίλεξε ξανά χώρο και δοκίμασε πάλι.';
+      return isGreek
+          ? 'Ο επιλεγμένος χώρος δεν υπάρχει πλέον. Επίλεξε ξανά χώρο και δοκίμασε πάλι.'
+          : 'The selected space no longer exists. Select a space again and try once more.';
     }
 
     final contextualQuestion = _knowledge.contextualize(
@@ -484,45 +536,50 @@ class AppState extends ChangeNotifier {
             ? insightsFor(selectedRoom)
             : <Insight>[];
 
-    // REMOTE-FIRST ROUTING
-    // When the cloud AI is available, every normal user question goes there
-    // first. This prevents broad local keyword matching from hijacking general
-    // questions (for example, "αναλυτικά" accidentally matching Analytics).
-    // The backend already receives the full EdgeSpace app context, current
-    // topology, telemetry summary and recent conversation, so it can answer
-    // both general questions and app-specific questions naturally.
+    // ============================================================
+    // REMOTE AI - FIRST
+    // ============================================================
+
     if (useGemini && backendOnline) {
       try {
+        final remoteContext = _knowledge.buildRemoteContext(
+          stateSummary: _buildAiStateSummary(
+            selectedRoom: selectedRoom,
+          ),
+        );
+
         final reply = await ApiClient(
           backendUrl,
         ).askAiDetailed(
-          question: question,
+          question: remoteQuestion,
           roomId: selectedRoom?.id,
           conversation: conversation,
-          appContext: _knowledge.buildRemoteContext(
-            stateSummary: _buildAiStateSummary(
-              selectedRoom: selectedRoom,
-            ),
-          ),
+          appContext: '''
+$languageInstruction
+
+$remoteContext
+''',
         );
 
         if (reply.answer.isNotEmpty) {
           activeAiModel = reply.model.isEmpty ? activeAiModel : reply.model;
+
           aiFallbackUsed = reply.fallbackUsed;
           aiUsingRemote = true;
+
           notifyListeners();
+
           return reply.answer;
         }
       } catch (e) {
-        // Keep the app usable, but expose the real remote failure in Flutter
-        // logs so a timeout/API error is never hidden behind a local answer.
         debugPrint('EdgeSpace remote AI failed: $e');
       }
     }
 
+    // ============================================================
     // LOCAL APP GUIDE FALLBACK
-    // Used when cloud AI is disabled/unavailable or when all remote models
-    // fail. It remains useful for deterministic navigation/help.
+    // ============================================================
+
     final appGuideAnswer = _knowledge.answer(
       contextualQuestion,
       buildingCount: buildings.length,
@@ -535,29 +592,77 @@ class AppState extends ChangeNotifier {
 
     if (appGuideAnswer != null) {
       _markLocalAi();
+
+      // The existing local knowledge base currently contains mostly
+      // Greek deterministic responses. Do not show Greek text while
+      // the application is explicitly set to English.
+      if (!isGreek) {
+        return useGemini
+            ? 'The cloud AI is temporarily unavailable. Please try again in a moment.'
+            : 'Cloud AI is disabled. Enable the AI Advisor in Settings to ask questions in English.';
+      }
+
       return appGuideAnswer;
     }
 
+    // ============================================================
+    // GENERAL LOCAL FALLBACK
+    // ============================================================
+
     if (!_advisor.canAnswer(contextualQuestion)) {
       _markLocalAi();
+
+      if (isGreek) {
+        return backendOnline && useGemini
+            ? 'Το cloud AI δεν μπόρεσε να απαντήσει αυτή τη στιγμή. Δοκίμασε ξανά σε λίγο.'
+            : 'Η ερώτησή σου χρειάζεται το cloud AI για να απαντηθεί σωστά. Αυτή τη στιγμή δεν είναι διαθέσιμο, αλλά μπορώ να σε βοηθήσω με τη χρήση του EdgeSpace AI και με τις μετρήσεις των χώρων.';
+      }
+
       return backendOnline && useGemini
-          ? 'Το cloud AI δεν μπόρεσε να απαντήσει αυτή τη στιγμή. Δοκίμασε ξανά σε λίγο.'
-          : 'Η ερώτησή σου χρειάζεται το cloud AI για να απαντηθεί σωστά. Αυτή τη στιγμή δεν είναι διαθέσιμο, αλλά μπορώ να σε βοηθήσω με τη χρήση του EdgeSpace AI και με τις μετρήσεις των χώρων.';
+          ? 'The cloud AI could not answer right now. Please try again in a moment.'
+          : 'This question requires the cloud AI for a complete answer. It is currently unavailable.';
     }
+
+    // ============================================================
+    // NO SENSOR DATA
+    // ============================================================
 
     if (relevantSnapshots.isEmpty) {
       _markLocalAi();
+
+      if (isGreek) {
+        return selectedRoom == null
+            ? 'Δεν υπάρχουν ακόμη μετρήσεις χώρων για ανάλυση. Μπορείς όμως να με ρωτήσεις οτιδήποτε για το πώς χρησιμοποιείται η εφαρμογή, π.χ. «πώς φτιάχνω νέο δωμάτιο;».'
+            : 'Δεν υπάρχουν ακόμη μετρήσεις για το ${selectedRoom.name}. Μπορώ παρ’ όλα αυτά να σε καθοδηγήσω για τις λειτουργίες της εφαρμογής ή τη σύνδεση του kit.';
+      }
+
       return selectedRoom == null
-          ? 'Δεν υπάρχουν ακόμη μετρήσεις χώρων για ανάλυση. Μπορείς όμως να με ρωτήσεις οτιδήποτε για το πώς χρησιμοποιείται η εφαρμογή, π.χ. «πώς φτιάχνω νέο δωμάτιο;».'
-          : 'Δεν υπάρχουν ακόμη μετρήσεις για το ${selectedRoom.name}. Μπορώ παρ’ όλα αυτά να σε καθοδηγήσω για τις λειτουργίες της εφαρμογής ή τη σύνδεση του kit.';
+          ? 'There are no space measurements available for analysis yet.'
+          : 'There are no measurements available for ${selectedRoom.name} yet.';
     }
 
+    // ============================================================
+    // LOCAL SENSOR ADVISOR
+    // ============================================================
+
     _markLocalAi();
-    return _advisor.answer(
+
+    final localAnswer = _advisor.answer(
       contextualQuestion,
       relevantSnapshots,
       relevantInsights,
     );
+
+    if (isGreek) {
+      return localAnswer;
+    }
+
+    // Current LocalAdvisor responses are primarily Greek.
+    // Until LocalAdvisor itself is localized, never display a Greek
+    // fallback while the UI language is English.
+    return useGemini
+        ? 'The cloud AI is temporarily unavailable. Your sensor data are still available in Analytics and the room dashboard.'
+        : 'Cloud AI is disabled. Your sensor data are still available in Analytics and the room dashboard.';
   }
 
   String _buildAiStateSummary({
@@ -576,7 +681,8 @@ class AppState extends ChangeNotifier {
     buffer.writeln('Online kits: $onlineDevices');
     buffer.writeln('Active alerts: $activeAlerts');
     if (selectedRoom != null) {
-      buffer.writeln('Selected AI scope: ${selectedRoom.name} (${selectedRoom.id})');
+      buffer.writeln(
+          'Selected AI scope: ${selectedRoom.name} (${selectedRoom.id})');
     } else {
       buffer.writeln('Selected AI scope: All spaces');
     }
@@ -598,8 +704,10 @@ class AppState extends ChangeNotifier {
       buffer.write(' ($deviceStatus)');
 
       if (hasData) {
-        buffer.write(' | temp ${roomSnapshot.temperature.toStringAsFixed(1)} C');
-        buffer.write(' | humidity ${roomSnapshot.humidity.toStringAsFixed(0)}%');
+        buffer
+            .write(' | temp ${roomSnapshot.temperature.toStringAsFixed(1)} C');
+        buffer
+            .write(' | humidity ${roomSnapshot.humidity.toStringAsFixed(0)}%');
         buffer.write(' | noise ${roomSnapshot.noise.toStringAsFixed(0)}');
         final motionLabel = roomSnapshot.motion ? 'active' : 'idle';
         buffer.write(' | motion $motionLabel');

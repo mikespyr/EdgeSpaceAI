@@ -1,11 +1,13 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../app_state.dart';
 import '../core/app_theme.dart';
+import '../l10n/language_controller.dart';
 import '../models/models.dart';
 import '../widgets/common.dart';
 
@@ -41,6 +43,34 @@ class _AiScreenState extends State<AiScreen> {
     return 'edgespace_ai_chat_main';
   }
 
+  String _welcomeText(BuildContext context) {
+    return context.tr(
+      "Hi! I'm the EdgeSpace AI Assistant. Talk to me naturally — you don't "
+          "need predefined commands. You can ask me who I am, how the app works, "
+          "or ask for help with Buildings, Rooms, ESP32-C3, Analytics, Settings "
+          "and your space measurements.\n\n"
+          "For example: “How are you?”, “How do I create a new room?” or "
+          "“How do I connect an ESP32-C3?”",
+      'Γεια! Είμαι ο EdgeSpace AI Assistant. Μίλα μου φυσικά — δεν χρειάζονται '
+          'προκαθορισμένες εντολές. Μπορείς να με ρωτήσεις πώς είμαι, ποιος είμαι, '
+          'πώς λειτουργεί η εφαρμογή ή να μου ζητήσεις βοήθεια με Buildings, Rooms, '
+          'ESP32-C3, Analytics, Settings και τις μετρήσεις των χώρων.\n\n'
+          'Για παράδειγμα: «Τι κάνεις;», «Πώς φτιάχνω νέο δωμάτιο;» ή '
+          '«Πώς συνδέω ένα ESP32-C3;».',
+    );
+  }
+
+  bool _isWelcomeMessage(ChatMessage message) {
+    if (message.fromUser) return false;
+
+    return message.text.startsWith(
+          'Γεια! Είμαι ο EdgeSpace AI Assistant.',
+        ) ||
+        message.text.startsWith(
+          "Hi! I'm the EdgeSpace AI Assistant.",
+        );
+  }
+
   @override
   void initState() {
     super.initState();
@@ -51,12 +81,7 @@ class _AiScreenState extends State<AiScreen> {
   void _addWelcomeMessage() {
     messages.add(
       ChatMessage(
-        text: 'Γεια! Είμαι ο EdgeSpace AI Assistant. Μίλα μου φυσικά — δεν χρειάζονται '
-            'προκαθορισμένες εντολές. Μπορείς να με ρωτήσεις πώς είμαι, ποιος είμαι, '
-            'πώς λειτουργεί η εφαρμογή ή να μου ζητήσεις βοήθεια με Buildings, Rooms, '
-            'ESP32-C3, Analytics, Settings και τις μετρήσεις των χώρων.\n\n'
-            'Για παράδειγμα: «Τι κάνεις;», «Πώς φτιάχνω νέο δωμάτιο;» ή '
-            '«Πώς συνδέω ένα ESP32-C3;».',
+        text: _welcomeText(context),
         fromUser: false,
         createdAt: DateTime.now(),
       ),
@@ -168,20 +193,20 @@ class _AiScreenState extends State<AiScreen> {
                   ],
                   Expanded(
                     child: Text(
-                      'AI Assistant',
+                      context.tr('AI Assistant', 'Βοηθός AI'),
                       style: widget.standalone
                           ? Theme.of(context).textTheme.titleLarge
                           : Theme.of(context).textTheme.headlineSmall,
                     ),
                   ),
                   StatusChip(
-                    label: usingRemoteAi ? 'Gemini + App Guide' : 'App Guide',
+                    label: state.aiBadgeLabel,
                     color: usingRemoteAi ? EdgeColors.blue : EdgeColors.green,
                     icon: Icons.auto_awesome_rounded,
                   ),
                   const SizedBox(width: 4),
                   IconButton(
-                    tooltip: 'Clear chat',
+                    tooltip: context.tr('Clear chat', 'Καθαρισμός συνομιλίας'),
                     onPressed: loading ? null : _clearChat,
                     icon: const Icon(
                       Icons.delete_sweep_outlined,
@@ -193,15 +218,23 @@ class _AiScreenState extends State<AiScreen> {
               const SizedBox(height: 12),
               DropdownButtonFormField<String>(
                 initialValue: effectiveSelectedRoomId ?? 'all',
-                decoration: const InputDecoration(
-                  labelText: 'Analysis scope',
-                  prefixIcon: Icon(Icons.filter_alt_outlined),
+                decoration: InputDecoration(
+                  labelText: context.tr(
+                    'Analysis scope',
+                    'Πεδίο ανάλυσης',
+                  ),
+                  prefixIcon: const Icon(Icons.filter_alt_outlined),
                   isDense: true,
                 ),
                 items: [
-                  const DropdownMenuItem(
+                  DropdownMenuItem(
                     value: 'all',
-                    child: Text('All spaces'),
+                    child: Text(
+                      context.tr(
+                        'All spaces',
+                        'Όλοι οι χώροι',
+                      ),
+                    ),
                   ),
                   ...state.rooms.map(
                     (room) => DropdownMenuItem(
@@ -224,19 +257,31 @@ class _AiScreenState extends State<AiScreen> {
                 child: Row(
                   children: [
                     _QuickPrompt(
-                      text: 'Πώς φτιάχνω νέο δωμάτιο;',
+                      text: context.tr(
+                        'How do I create a new room?',
+                        'Πώς φτιάχνω νέο δωμάτιο;',
+                      ),
                       onTap: _sendPreset,
                     ),
                     _QuickPrompt(
-                      text: 'Πώς συνδέω ESP32-C3;',
+                      text: context.tr(
+                        'How do I connect an ESP32-C3?',
+                        'Πώς συνδέω ESP32-C3;',
+                      ),
                       onTap: _sendPreset,
                     ),
                     _QuickPrompt(
-                      text: 'Τι πρέπει να προσέξω σήμερα;',
+                      text: context.tr(
+                        'What should I pay attention to today?',
+                        'Τι πρέπει να προσέξω σήμερα;',
+                      ),
                       onTap: _sendPreset,
                     ),
                     _QuickPrompt(
-                      text: 'Τι μπορείς να κάνεις;',
+                      text: context.tr(
+                        'What can you do?',
+                        'Τι μπορείς να κάνεις;',
+                      ),
                       onTap: _sendPreset,
                     ),
                   ],
@@ -263,7 +308,17 @@ class _AiScreenState extends State<AiScreen> {
                     if (index == messages.length && loading) {
                       return const _ThinkingBubble();
                     }
-                    return _ChatBubble(message: messages[index]);
+                    final message = messages[index];
+
+                    final displayMessage = _isWelcomeMessage(message)
+                        ? ChatMessage(
+                            text: _welcomeText(context),
+                            fromUser: false,
+                            createdAt: message.createdAt,
+                          )
+                        : message;
+
+                    return _ChatBubble(message: displayMessage);
                   },
                 ),
         ),
@@ -281,8 +336,11 @@ class _AiScreenState extends State<AiScreen> {
                     maxLines: 4,
                     textInputAction: TextInputAction.send,
                     onSubmitted: (_) => _send(),
-                    decoration: const InputDecoration(
-                      hintText: 'Γράψε μου όπως θα μιλούσες σε έναν βοηθό...',
+                    decoration: InputDecoration(
+                      hintText: context.tr(
+                        'Write to me naturally, like you would to an assistant...',
+                        'Γράψε μου όπως θα μιλούσες σε έναν βοηθό...',
+                      ),
                       isDense: true,
                     ),
                   ),
@@ -322,7 +380,12 @@ class _AiScreenState extends State<AiScreen> {
           ),
           onPressed: () => Navigator.pop(context),
         ),
-        title: const Text('Room AI'),
+        title: Text(
+          context.tr(
+            'Room AI',
+            'AI Χώρου',
+          ),
+        ),
       ),
       body: body,
     );
@@ -355,7 +418,9 @@ class _AiScreenState extends State<AiScreen> {
     }
 
     final state = context.read<AppState>();
-    final priorConversation = List<ChatMessage>.from(messages);
+    final responseLanguageCode = context.isGreek ? 'el' : 'en';
+    final priorConversation =
+        messages.where((message) => !_isWelcomeMessage(message)).toList();
 
     setState(() {
       messages.add(
@@ -382,6 +447,7 @@ class _AiScreenState extends State<AiScreen> {
         text,
         roomId: safeRoomId,
         conversation: priorConversation,
+        responseLanguageCode: responseLanguageCode,
       );
 
       if (!mounted) {
@@ -500,15 +566,89 @@ class _ChatBubble extends StatelessWidget {
             ),
           ],
         ),
-        child: Text(
-          message.text,
-          style: TextStyle(
-            color: user ? Colors.white : const Color(0xFF182A35),
-            fontSize: 12.5,
-            height: 1.48,
-            fontWeight: user ? FontWeight.w600 : FontWeight.w500,
-          ),
-        ),
+        child: user
+            ? Text(
+                message.text,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 12.5,
+                  height: 1.48,
+                  fontWeight: FontWeight.w600,
+                ),
+              )
+            : MarkdownBody(
+                data: message.text,
+                selectable: true,
+                styleSheet: MarkdownStyleSheet(
+                  p: const TextStyle(
+                    color: Color(0xFF182A35),
+                    fontSize: 12.5,
+                    height: 1.48,
+                    fontWeight: FontWeight.w500,
+                  ),
+                  h1: const TextStyle(
+                    color: Color(0xFF102A3A),
+                    fontSize: 18,
+                    height: 1.3,
+                    fontWeight: FontWeight.w800,
+                  ),
+                  h2: const TextStyle(
+                    color: Color(0xFF102A3A),
+                    fontSize: 16,
+                    height: 1.35,
+                    fontWeight: FontWeight.w800,
+                  ),
+                  h3: const TextStyle(
+                    color: Color(0xFF102A3A),
+                    fontSize: 14,
+                    height: 1.4,
+                    fontWeight: FontWeight.w800,
+                  ),
+                  strong: const TextStyle(
+                    color: Color(0xFF102A3A),
+                    fontWeight: FontWeight.w800,
+                  ),
+                  em: const TextStyle(
+                    color: Color(0xFF29485A),
+                    fontStyle: FontStyle.italic,
+                  ),
+                  code: const TextStyle(
+                    color: Color(0xFF0D4F73),
+                    backgroundColor: Color(0xFFE1EDF4),
+                    fontSize: 11.5,
+                    fontWeight: FontWeight.w600,
+                  ),
+                  listBullet: const TextStyle(
+                    color: Color(0xFF1687C9),
+                    fontSize: 13,
+                    fontWeight: FontWeight.w800,
+                  ),
+                  blockquote: const TextStyle(
+                    color: Color(0xFF36505E),
+                    fontSize: 12.5,
+                    height: 1.45,
+                    fontStyle: FontStyle.italic,
+                  ),
+                  a: const TextStyle(
+                    color: Color(0xFF147FC1),
+                    decoration: TextDecoration.underline,
+                  ),
+                  codeblockPadding: const EdgeInsets.all(10),
+                  codeblockDecoration: BoxDecoration(
+                    color: const Color(0xFFE7F0F5),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  blockquotePadding: const EdgeInsets.fromLTRB(10, 4, 8, 4),
+                  blockquoteDecoration: const BoxDecoration(
+                    border: Border(
+                      left: BorderSide(
+                        color: Color(0xFF4AA8DA),
+                        width: 3,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
       ),
     );
   }
